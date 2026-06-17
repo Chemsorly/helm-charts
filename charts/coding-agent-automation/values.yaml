@@ -5,18 +5,25 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# ── Global image defaults ────────────────────────────────────────────────────
+
 image:
-  registry: docker.io
-  repository: chemsorly/coding-agent
   pullPolicy: IfNotPresent
 
 # ── Orchestrator ─────────────────────────────────────────────────────────────
 
 orchestrator:
   image:
-    # Tag for the orchestrator image. On release, CI overwrites this to SHA-suffixed value.
-    tag: coding-agent-webui-ac57767
+    repository: chemsorly/coding-agent
+    # Tag for the orchestrator image. On release, CI overwrites this to semver.
+    tag: coding-agent-webui-0.1.1
   replicas: 1
+  # Additional annotations on the Deployment metadata (e.g., reloader.stakater.com/auto: "true")
+  annotations: {}
+  # Pod-level securityContext (e.g., runAsUser, fsGroup for hostPath ownership)
+  podSecurityContext: {}
+  # Extra initContainers injected before the main container (e.g., permission fixers)
+  initContainers: []
   service:
     type: ClusterIP
     port: 8080
@@ -52,7 +59,7 @@ orchestrator:
       periodSeconds: 5
       timeoutSeconds: 3
       failureThreshold: 3
-  terminationGracePeriodSeconds: 60
+  terminationGracePeriodSeconds: 30
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -77,7 +84,7 @@ orchestrator:
   env:
     # Seconds to wait before resuming pipeline loop after pod restart (prevents dispatch to
     # agents mid-termination during rolling updates). Must be > agent terminationGracePeriodSeconds.
-    pipelineLoopStartupDelaySeconds: 90
+    pipelineLoopStartupDelaySeconds: 30
     # Seconds to wait after marking /readyz as 503 before proceeding with shutdown.
     readinessDrainDelaySeconds: 15
     # Log level for the orchestrator application
@@ -91,14 +98,19 @@ agents:
   - name: agent-kiro-dotnet-1
     enabled: true
     image:
-      tag: coding-agent-kiro-dotnet10-ac57767
-    agentId: agent-1
-    agentType: kiro-dotnet10
+      repository: chemsorly/coding-agent
+      tag: coding-agent-kiro-dotnet10-0.1.1
     # Provider type determines volume mount profile:
-    #   kiro    → mounts kiro-cli-data volume + AWS credentials
+    #   kiro    → mounts kiro-cli-data volume
     #   opencode → mounts opencode config file from Secret
     providerType: kiro
     labels: "kiro,dotnet,dotnet10"
+    # Additional annotations on the Deployment metadata
+    annotations: {}
+    # Pod-level securityContext
+    podSecurityContext: {}
+    # Extra initContainers
+    initContainers: []
     persistence:
       # Storage backend: pvc (default/cloud), hostPath (bare-metal), emptyDir (testing)
       # Recommendation: use a storageClass with WaitForFirstConsumer volume binding mode.
@@ -114,7 +126,7 @@ agents:
       limits:
         cpu: "4"
         memory: 8Gi
-    terminationGracePeriodSeconds: 45
+    terminationGracePeriodSeconds: 15
     strategy:
       type: Recreate
     nodeSelector: {}
