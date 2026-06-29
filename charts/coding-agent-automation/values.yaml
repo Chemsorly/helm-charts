@@ -16,7 +16,7 @@ orchestrator:
   image:
     repository: chemsorly/coding-agent
     # Tag for the orchestrator image. On release, CI overwrites this to semver.
-    tag: coding-agent-webui-0.2.0
+    tag: coding-agent-webui-0.2.1
   replicas: 1
   # Additional annotations on the Deployment metadata (e.g., reloader.stakater.com/auto: "true")
   annotations: {}
@@ -104,7 +104,7 @@ agents:
     enabled: true
     image:
       repository: chemsorly/coding-agent
-      tag: coding-agent-kiro-dotnet10-0.2.0
+      tag: coding-agent-kiro-dotnet10-0.2.1
     # Provider type determines volume mount profile:
     #   kiro    → mounts kiro-cli-data volume
     #   opencode → mounts opencode config file from Secret
