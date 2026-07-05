@@ -16,7 +16,7 @@ orchestrator:
   image:
     repository: chemsorly/coding-agent
     # Tag for the orchestrator image. On release, CI overwrites this to semver.
-    tag: coding-agent-webui-0.2.1
+    tag: coding-agent-webui-0.3.0
   replicas: 1
   # Additional annotations on the Deployment metadata (e.g., reloader.stakater.com/auto: "true")
   annotations: {}
@@ -104,12 +104,14 @@ agents:
     enabled: true
     image:
       repository: chemsorly/coding-agent
-      tag: coding-agent-kiro-dotnet10-0.2.1
+      tag: coding-agent-kiro-dotnet10-0.3.0
     # Provider type determines volume mount profile:
     #   kiro    → mounts kiro-cli-data volume
     #   opencode → mounts opencode config file from Secret
     providerType: kiro
     labels: "kiro,dotnet,dotnet10"
+    # Max concurrent Jobs for this label set in K8s mode. 0 = no limit.
+    maxConcurrent: 0
     # Additional annotations on the Deployment metadata
     annotations: {}
     # Pod-level securityContext
@@ -198,12 +200,8 @@ database:
   # Npgsql SSL mode: Disable, Prefer, Require, VerifyCA, VerifyFull.
   # Defaults to Require in production if not set. Use "Disable" for in-cluster Postgres without TLS.
   sslMode: ""
-  # Apply EF Core migrations on orchestrator startup (dev/single-instance mode).
-  # In production multi-replica mode, set to false and use migrationJob instead.
+  # Apply EF Core migrations on orchestrator startup. Uses distributed lock for multi-replica safety.
   migrateOnStartup: true
-  # Pre-install/pre-upgrade Helm hook Job that runs EF Core migrations before new pods roll out.
-  migrationJob:
-    enabled: true
 
 # ── Work Distribution ────────────────────────────────────────────────────────
 
@@ -219,25 +217,6 @@ workDistribution:
     intervalSeconds: 30
     timeoutEnforcementEnabled: true
     staleRetentionDays: 7
-  # Image mapping: sorted comma-joined agent labels → container image.
-  # Example: "kiro,dotnet,dotnet10": "chemsorly/coding-agent:coding-agent-kiro-dotnet10"
-  imageMapping: {}
-  # Resource requests/limits for spawned agent Jobs
-  jobResources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: "4"
-      memory: 8Gi
-  # Max concurrent pods per agent selector group (no limit if not specified)
-  maxConcurrentPods: {}
-  # Pod scheduling fields injected into spawned Job pod templates
-  scheduling:
-    priorityClassName: ""
-    nodeSelector: {}
-    tolerations: []
-    topologySpreadConstraints: []
 
 # ── Credential Pools ─────────────────────────────────────────────────────────
 
