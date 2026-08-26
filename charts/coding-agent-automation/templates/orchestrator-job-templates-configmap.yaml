@@ -1,17 +1,19 @@
-{{- if and .Values.database.enabled (eq .Values.workDistribution.mode "Kubernetes") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "coding-agent-automation.fullname" . }}-job-templates
   labels:
     {{- include "coding-agent-automation.labels" . | nindent 4 }}
-    app.kubernetes.io/component: orchestrator
+    app.kubernetes.io/component: shared-config
 data:
   job-templates.yaml: |
-    {{- range .Values.agents }}
-    {{- if .enabled }}
+    {{- if not .Values.jobTemplates }}
+    []
+    {{- end }}
+    {{- range .Values.jobTemplates }}
     - labels: {{ .labels | quote }}
-      image: "{{ .image.repository }}:{{ .image.tag }}"
+      image: {{ .image | quote }}
+      imagePullPolicy: {{ .imagePullPolicy | default "Always" | quote }}
       providerType: {{ .providerType | quote }}
       maxConcurrent: {{ .maxConcurrent | default 0 }}
       {{- if .resources }}
@@ -46,5 +48,3 @@ data:
         {{- toYaml .tolerations | nindent 8 }}
       {{- end }}
     {{- end }}
-    {{- end }}
-{{- end }}
