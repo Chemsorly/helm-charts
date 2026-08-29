@@ -16,7 +16,7 @@ orchestrator:
   image:
     repository: chemsorly/coding-agent
     # Tag for the orchestrator image. On release, CI overwrites this to semver.
-    tag: coding-agent-webui-0.4.3
+    tag: coding-agent-webui-0.4.4
   replicas: 2
   # Additional annotations on the Deployment metadata (e.g., reloader.stakater.com/auto: "true")
   annotations: {}
@@ -90,6 +90,10 @@ orchestrator:
     readinessDrainDelaySeconds: 15
     # Log level for the orchestrator application
     logLevel: Information
+    # Grafana Faro collector URL for frontend RUM monitoring.
+    # Get this from Grafana Cloud → Frontend Observability → your app → Web SDK Config.
+    # Leave empty to disable Faro (no CDN load, no data sent).
+    faroCollectorUrl: ""
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 
