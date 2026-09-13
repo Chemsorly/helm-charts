@@ -13,7 +13,8 @@ metadata:
 spec:
   # Spec 046: api.replicas > 1 is now safe. AgentRegistryService, OrchestratorRunService, and
   # JobDeduplicationGuardService are backed by Redis when signalr.redis.connectionString is set.
-  # If signalr.redis.connectionString is empty and replicas > 1, a startup warning is logged.
+  # Spec 048 Phase 2: if signalr.redis.connectionString is empty and replicas > 1, the chart now
+  # fails at render time (see _deprecations.tpl) — this is no longer just a startup warning.
   replicas: {{ .Values.api.replicas }}
   # RollingUpdate is safe after Spec 046. signalr.redis.connectionString must be set for
   # multi-replica deployments to avoid divergent in-memory state between old and new pods
@@ -86,7 +87,7 @@ spec:
             - name: ASPNETCORE_URLS
               value: "http://+:{{ .Values.api.service.port }}"
             {{- include "coding-agent-automation.secretEnv" . | nindent 12 }}
-            {{- include "coding-agent-automation.otelEnv" (dict "serviceName" "coding-agent-api" "root" .) | nindent 12 }}
+            {{- include "coding-agent-automation.otelEnv" (dict "serviceName" (.Values.otel.apiServiceName | default "coding-agent-api") "root" .) | nindent 12 }}
             - name: LOG_LEVEL
               value: {{ .Values.api.env.logLevel | default "Information" | quote }}
             - name: DB_LOG_LEVEL
@@ -120,11 +121,11 @@ spec:
               value: {{ .Values.database.migrateOnStartup | toString | quote }}
             {{- include "coding-agent-automation.signalrEnv" . | nindent 12 }}
             # WorkDistribution env vars — required by DispatchServiceOptionsFactory.Create(),
-            # consumed by ModelFetchJobService and ConsolidationWorkItemDispatchService (Req 9.3c).
+            # consumed by ModelFetchJobService.
             # Without these the factory returns empty OrchestratorUrl / ServiceAccount, and
             # JobSpecBuilder emits a Job spec the K8s admission webhook rejects.
-            # ORCHESTRATOR_URL handed to the consolidation and model-fetch agent pods dispatched
-            # from this process. Must be the Pipeline API, not the orchestrator.
+            # ORCHESTRATOR_URL handed to the model-fetch agent pods dispatched
+            # from this process. Must be the Pipeline API, not the web service.
             {{- include "coding-agent-automation.workDistributionEnv" . | nindent 12 }}
           volumeMounts:
             - name: job-templates
