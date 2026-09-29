@@ -18,7 +18,7 @@ web:
   image:
     repository: chemsorly/coding-agent
     # Tag for the web image. On release, CI overwrites this to semver.
-    tag: coding-agent-web-0.4.6
+    tag: coding-agent-web-0.4.7
   replicas: 2
   # Additional annotations on the Deployment metadata (e.g., reloader.stakater.com/auto: "true")
   annotations: {}
@@ -114,27 +114,73 @@ web:
     # This value is injected as the <base href> in the HTML shell so the browser resolves all
     # relative asset and navigation URLs correctly under the proxy prefix.
     basePath: "./"
+  # Consolidation unified-dispatch feature flag.
+  # When true, consolidation runs are enqueued as Pending WorkItems (unified dispatch path).
+  # When false (default), consolidation runs use the legacy synchronous dispatch path.
+  # Enable after #2563 (RunType tier ordering at dispatch) is deployed.
+  consolidation:
+    unifiedDispatch:
+      enabled: false
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 
 secrets:
-  # REQUIRED: API key for agent authentication.
-  # Plain string value. Chart fails if empty and no existingSecret is set.
+  # API key for agent authentication.
+  # When empty (default), a cryptographically secure key is auto-generated on first install
+  # by a pre-install/pre-upgrade hook Job and stored in the chart-managed Secret.
+  # The generated key is preserved across upgrades (the hook is a no-op when the Secret exists).
+  # Set explicitly to use an operator-supplied key instead of auto-generation.
+  # To retrieve the auto-generated key after install:
+  #   kubectl get secret <release>-coding-agent-automation -n <ns> \
+  #     -o jsonpath='{.data.agent-api-key}' | base64 -d
   agentApiKey: ""
 
   # Optional: OTEL exporter authorization header (e.g., "Api-Token dt0c01.xxx" for Dynatrace)
   otelHeaders: ""
 
-  # Optional: OpenCode configuration JSON content (mounted as file for opencode agents)
-  # Multi-line JSON string containing the opencode provider configuration.
+  # Optional: OpenCode configuration JSON content for opencode providerType agent jobs.
+  # When empty (default), the key is omitted from the chart-managed Secret entirely, allowing
+  # operators to patch it manually via kubectl without it being overwritten on helm upgrade.
+  # When set, this value takes precedence over any live-patched value in the Secret.
   opencodeConfigContent: ""
 
 # Name of an existing Kubernetes Secret to use instead of creating one.
 # When set, the chart does NOT create a Secret resource and references this name
 # in all volume mounts and env var sources.
-# The referenced Secret must contain keys: agent-api-key, otel-headers,
-# opencode-config-content
+# The referenced Secret must contain keys: agent-api-key, otel-headers.
+# opencode-config-content is optional — only required when using opencode providerType agent templates.
 existingSecret: ""
+
+# ── Secret Initialization Hook ───────────────────────────────────────────────
+# Controls the pre-install/pre-upgrade hook Job that auto-generates the agent-api-key
+# Secret on first install when secrets.agentApiKey is not set explicitly.
+# The hook is skipped entirely when existingSecret or secrets.agentApiKey is set.
+
+secretInit:
+  image:
+    # Official Kubernetes project kubectl image used by the secret-init hook Job.
+    # Pin to a semver tag matching your cluster's minor version (±1 skew is safe per
+    # the Kubernetes version skew policy). For production, override with a digest-pinned
+    # reference: e.g. registry.k8s.io/kubectl@sha256:<digest>
+    # NOTE: Use registry.k8s.io/kubectl — bitnami/kubectl is no longer accessible as of
+    # September 2025 following the Broadcom acquisition.
+    repository: registry.k8s.io/kubectl
+    tag: "v1.32.0"
+  # Maximum seconds the hook Job may run before it is forcibly failed.
+  # Without this bound, a stuck image pull (air-gapped cluster, registry.k8s.io blocked)
+  # would freeze `helm install` indefinitely since pre-install hooks block Helm until they
+  # complete or fail. After this deadline the Job fails with a clear error message.
+  activeDeadlineSeconds: 120
+  # Resource requests/limits for the hook Job container.
+  # Override if your cluster enforces LimitRange or ResourceQuota policies that reject
+  # pods with no explicit resource specification.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
 
 # ── OpenTelemetry ────────────────────────────────────────────────────────────
 
@@ -146,16 +192,13 @@ otel:
   # (Legacy alias: orchestratorServiceName is still honored if set — see web-env-configmap.yaml.)
   webServiceName: coding-agent-web
   # OTEL_SERVICE_NAME for the API process.
-  # Defaults to "coding-agent-web" so the API's ExecutePipeline spans appear
-  # under the same service name that the Grafana "Recent Pipeline Traces" panel queries
-  # (rootServiceName="coding-agent-web"). Override to "coding-agent-api" if you
-  # need to distinguish API spans from web (Blazor UI) spans in Tempo.
-  # TODO: This default collapses the API process and the Blazor UI process into the same
-  # service.name in Tempo, making it impossible to distinguish API-origin spans from
-  # web spans. Consider changing the default to "coding-agent-api" and updating
-  # the Grafana panel query to rootServiceName=~"coding-agent-web|coding-agent-api".
-  # See review warning (issue #2255).
-  apiServiceName: coding-agent-web
+  # Set to "coding-agent-api" to distinguish API spans, metrics and logs from the Blazor web process.
+  # The Grafana "Recent Pipeline Traces" panel no longer depends on rootServiceName="coding-agent-web"
+  # (updated in #2966), so changing this default does not break that panel.
+  # ⚠️  Breaking change: upgrading from a previous release will rename API telemetry from
+  # "coding-agent-web" to "coding-agent-api" — update any Grafana dashboards or alerts that
+  # filter on service.name="coding-agent-web" for API traffic.
+  apiServiceName: coding-agent-api
   resourceAttributes: ""
 
 # ── ServiceAccount ───────────────────────────────────────────────────────────
@@ -359,6 +402,13 @@ api:
     # Allows Kubernetes to remove the pod from Service endpoints before connections are dropped.
     # Mirrors web.env.readinessDrainDelaySeconds. Must be < terminationGracePeriodSeconds - preStop.
     readinessDrainDelaySeconds: 15
+  # Consolidation unified-dispatch feature flag — gates whether GET /api/work-items/pending
+  # TODO: [WARNING] Stale class name — WorkItemDispatchPoller was renamed to WorkItemDispatchLoop (issue #2844).
+  # includes consolidation items for WorkItemDispatchLoop. Must match the web pod setting.
+  # Defaults false; enable after all prerequisites (#2582–#2585 + this change) deploy.
+  consolidation:
+    unifiedDispatch:
+      enabled: false
 
 # ── Job Controller ────────────────────────────────────────────────────────────
 
@@ -428,9 +478,10 @@ scheduler:
     # Empty (default) = release-scoped: caa-<release>-scheduler-lock
     leaseName: ""
   dispatch:
-    # Whether the Scheduler-side WorkItemDispatchPoller is enabled.
+    # Whether the Scheduler-side WorkItemDispatchLoop is enabled.
+    # TODO: [WARNING] Stale class name — WorkItemDispatchPoller was renamed to WorkItemDispatchLoop (issue #2844).
     # The API-side dispatch loop has been removed (issue #2547). Set to true to enable
-    # the Scheduler WorkItemDispatchPoller as the sole dispatcher.
+    # the Scheduler WorkItemDispatchLoop as the sole dispatcher.
     # TODO [WARNING]: This defaults to false. With the API-side dispatch loop removed and this
     # flag still false, a fresh install or an upgrade that does not explicitly set this to true
     # will have NO active dispatcher — Pending WorkItems will accumulate indefinitely and never

@@ -10,9 +10,16 @@ To add the Helm repository:
 
 To install (example):
   helm install my-release chemsorly/coding-agent-automation \
-    --set secrets.agentApiKey=YOUR_API_KEY \
     --set database.host=YOUR_POSTGRES_HOST \
     --set database.auth.existingSecret=YOUR_SECRET_NAME
+
+  A cryptographically secure agent-api-key is auto-generated on first install and preserved
+  across upgrades. To retrieve it after install:
+    kubectl get secret my-release-coding-agent-automation -n <namespace> \
+      -o jsonpath='{.data.agent-api-key}' | base64 -d
+
+  To supply your own key instead of auto-generation:
+    --set secrets.agentApiKey=YOUR_API_KEY
 
 The web service is available at:
   http://{{ include "coding-agent-automation.fullname" . }}-web:{{ $web.service.port }}
@@ -54,6 +61,22 @@ To migrate config from an existing instance:
 agents[] → jobTemplates[] migration:
   The agents[] values section is removed. Define agent pod specs in jobTemplates[].
   See values.yaml for the jobTemplates schema.
+
+{{- /* TODO: This section is rendered unconditionally even when scheduler.dispatch.enabled=true
+     (i.e., the correctly configured case), causing a misleading "REQUIRED" warning on every
+     helm install/upgrade for operators who already have it set correctly. Wrap this block in
+     {{- if and .Values.scheduler.enabled (not .Values.scheduler.dispatch.enabled) }} so it
+     only appears when the condition is actually unmet. Note: if made conditional, the CI step
+     "validate NOTES.txt mentions scheduler.dispatch.enabled" must be restructured accordingly
+     (e.g., use helm show notes or assert against the guard-fires output separately). */}}
+── Scheduler Dispatch ────────────────────────────────────────────────────────
+
+⚠️  REQUIRED: scheduler.dispatch.enabled must be set to true.
+The Scheduler's WorkItemDispatchLoop is the sole dispatcher for Pending WorkItems.
+The API-side dispatch loop was removed in issue #2547. Without this flag, Pending
+WorkItems accumulate indefinitely and are never promoted to Dispatched.
+
+  --set scheduler.dispatch.enabled=true
 
 ── Database ──────────────────────────────────────────────────────────────────
 
@@ -261,10 +284,15 @@ Health endpoints:
 
 Key metrics (OpenTelemetry):
   workitems_by_status                    — gauge by status and agent_selector
-  workitems_pending_duration_seconds     — histogram
-  dispatch_latency_seconds               — histogram
+  dispatch_latency_seconds               — histogram (buckets extended to 86400 s in #2976)
+  dispatch_attempts_total                — counter by result and reason (added in #2976)
+  pending_oldest_age_seconds             — gauge (added in #2976)
+  pod_start_seconds                      — histogram (added in #2976)
   dispatcher_last_poll_epoch_seconds     — gauge (staleness detection)
   credential_pool_available              — gauge (PVC pool headroom)
+  {{- /* TODO [WARNING]: workitems_pending_duration_seconds was removed in issue #2976 (duplicate
+       of dispatch_latency_seconds). Update any Grafana panels or alert rules that referenced it
+       to use workdistribution_dispatch_latency_seconds_bucket instead. */ -}}
 
 ── Scaling ───────────────────────────────────────────────────────────────────
 
