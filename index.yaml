@@ -2,6 +2,17 @@ apiVersion: v1
 entries:
   coding-agent-automation:
   - apiVersion: v2
+    appVersion: 0.4.7
+    created: "2026-09-29T11:11:35.412296233Z"
+    description: Multi-agent coding automation platform with a web frontend and configurable
+      agent workers
+    digest: 05390b15753e45d25203a2a1fcdd56e86348c905ed3711a8fdca7a2786947581
+    name: coding-agent-automation
+    type: application
+    urls:
+    - https://github.com/Chemsorly/helm-charts/releases/download/coding-agent-automation-0.4.7/coding-agent-automation-0.4.7.tgz
+    version: 0.4.7
+  - apiVersion: v2
     appVersion: 0.4.5
     created: "2026-09-13T07:32:16.9670101Z"
     description: Multi-agent coding automation platform with a web frontend and configurable
@@ -111,4 +122,4 @@ entries:
     urls:
     - https://github.com/Chemsorly/helm-charts/releases/download/coding-agent-automation-0.1.0/coding-agent-automation-0.1.0.tgz
     version: 0.1.0
-generated: "2026-09-13T07:32:16.967061626Z"
+generated: "2026-09-29T11:11:35.412341487Z"
