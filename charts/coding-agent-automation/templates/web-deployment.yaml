@@ -1,6 +1,5 @@
 {{- include "coding-agent-automation.deprecations" . }}
-{{- /* Web component values, with back-compat: legacy `orchestrator.*` overrides win over `web.*` defaults. Prefer `web.*` in new values. */ -}}
-{{- $web := mergeOverwrite (deepCopy (.Values.web | default dict)) (.Values.orchestrator | default dict) -}}
+{{- $web := .Values.web -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,6 +26,9 @@ spec:
       app.kubernetes.io/component: web
   template:
     metadata:
+      annotations:
+        # Spec 049: role bindings are read at startup; changed auth values restart the pods.
+        checksum/auth: {{ (.Values.auth | default dict) | toJson | sha256sum }}
       labels:
         {{- include "coding-agent-automation.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: web
@@ -106,6 +108,23 @@ spec:
                 name: {{ include "coding-agent-automation.fullname" . }}-web-env
           env:
             {{- include "coding-agent-automation.secretEnv" . | nindent 12 }}
+            # Spec 049: secrets of the user login (the rest of the auth config is in auth.json).
+            {{- if include "coding-agent-automation.adminEnabled" . }}
+            - name: Auth__Admin__Password
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "coding-agent-automation.adminSecretName" . }}
+                  key: {{ include "coding-agent-automation.adminSecretKey" . }}
+            {{- end }}
+            {{- with ((.Values.auth | default dict).oidc | default dict) }}
+            {{- if .enabled }}
+            - name: Auth__Oidc__ClientSecret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .clientSecret.existingSecret }}
+                  key: {{ .clientSecret.key | default "client-secret" }}
+            {{- end }}
+            {{- end }}
             # KubernetesWorkDistributor and KubernetesJobCleanup have been migrated to
             # IPipelineApiWorkItemClient. IPipelineRunHistoryService, IConsolidationRunStore,
             # IHarnessSuggestionStore, and IWorkItemFallbackTransitionService are all API-backed
@@ -139,24 +158,22 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # Consolidation unified-dispatch feature flag — gates whether consolidation runs
-            # are enqueued as Pending WorkItems (unified path) or dispatched synchronously
-            # (legacy path). Defaults false; enable after #2563 deploys.
-            # TODO: $web.consolidation will be nil if a partial values override omits the consolidation
-            # sub-tree entirely (e.g. --set web.someOtherKey=val without values.yaml loaded). Consider
-            # a defensive default: ((($web.consolidation | default dict).unifiedDispatch | default dict).enabled | default false)
-            # This is safe in normal helm install/upgrade usage where values.yaml is always loaded.
-            - name: Consolidation__UnifiedDispatch__Enabled
-              value: {{ $web.consolidation.unifiedDispatch.enabled | quote }}
             # Downward API: expose namespace and pod name so OTEL_RESOURCE_ATTRIBUTES can reference
             # them via $(VAR_NAME) substitution. These MUST come before OTEL_RESOURCE_ATTRIBUTES.
-            {{- include "coding-agent-automation.otelEnv" (dict "serviceName" (.Values.otel.webServiceName | default .Values.otel.orchestratorServiceName | default "coding-agent-web") "deploymentName" (printf "%s-web" (include "coding-agent-automation.fullname" .)) "root" .) | nindent 12 }}
+            {{- include "coding-agent-automation.otelEnv" (dict "serviceName" (.Values.otel.webServiceName | default "coding-agent-web") "deploymentName" (printf "%s-web" (include "coding-agent-automation.fullname" .)) "root" .) | nindent 12 }}
           volumeMounts:
+            - name: auth-config
+              mountPath: /app/config/auth.json
+              subPath: auth.json
+              readOnly: true
             - name: job-templates
               mountPath: /app/config/job-templates.yaml
               subPath: job-templates.yaml
               readOnly: true
       volumes:
+        - name: auth-config
+          configMap:
+            name: {{ include "coding-agent-automation.fullname" . }}-web-auth
         - name: job-templates
           configMap:
             name: {{ include "coding-agent-automation.fullname" . }}-job-templates

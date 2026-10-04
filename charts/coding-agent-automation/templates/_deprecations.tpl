@@ -14,15 +14,17 @@
 {{- if .Values.agents }}
   {{- fail "agents[] is removed. Define agent pod specs in jobTemplates[] instead. See NOTES.txt for the migration." }}
 {{- end }}
-{{- $webCfg := mergeOverwrite (deepCopy (.Values.web | default dict)) (.Values.orchestrator | default dict) }}
-{{- if hasKey $webCfg "persistence" }}
-  {{- fail "web.persistence (or legacy orchestrator.persistence) is removed. Configuration now lives in PostgreSQL. Remove it from your values." }}
+{{- if .Values.orchestrator }}
+  {{- fail "The legacy orchestrator block is removed. Rename orchestrator: to web: in your values." }}
+{{- end }}
+{{- if (.Values.otel | default dict).orchestratorServiceName }}
+  {{- fail "otel.orchestratorServiceName is removed. Rename it to otel.webServiceName in your values." }}
+{{- end }}
+{{- if hasKey (.Values.web | default dict) "persistence" }}
+  {{- fail "web.persistence is removed. Configuration now lives in PostgreSQL. Remove it from your values." }}
 {{- end }}
 {{- $redis := (.Values.signalr | default dict).redis | default dict }}
 {{- if and (gt (int (.Values.api.replicas | default 1)) 1) (empty $redis.connectionString) }}
   {{- fail "api.replicas is greater than 1 but signalr.redis.connectionString is empty. Without a Redis backplane the API's AgentRegistryService and OrchestratorRunService keep agent/run state in-memory per pod, so SignalR hub messages cannot be routed across replicas (split-brain state, dropped agent events). Spec 048 Phase 2 makes the API a hard dependency of the Web UI, so a multi-replica API MUST share state via Redis. Set signalr.redis.connectionString to a Redis connection string, or set api.replicas: 1 for a single-replica (in-memory) deployment." }}
-{{- end }}
-{{- if and .Values.scheduler.enabled (not .Values.scheduler.dispatch.enabled) }}
-  {{- fail "scheduler.dispatch.enabled must be true when scheduler is enabled. Without it, Pending WorkItems will never be dispatched (the API-side dispatch loop was removed in issue #2547). Set --set scheduler.dispatch.enabled=true to proceed." }}
 {{- end }}
 {{- end -}}
