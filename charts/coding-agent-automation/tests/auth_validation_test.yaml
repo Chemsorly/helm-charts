@@ -48,18 +48,38 @@ tests:
       auth.rbac.bindings:
         - group: team-a
           role: admin
-          project: payments
+          projectId: 6f1c2a9e-0000-0000-0000-000000000000
     asserts:
       - failedTemplate:
           errorPattern: "can only be bound globally"
 
-  - it: fails for several web replicas without Redis
+  - it: fails when project key is used instead of projectId
+    set:
+      auth.rbac.bindings:
+        - group: team-a
+          role: operator
+          project: payments-api
+    asserts:
+      - failedTemplate:
+          errorPattern: "no longer supported"
+
+  - it: fails when projectId is not a valid GUID
+    set:
+      auth.rbac.bindings:
+        - group: team-a
+          role: operator
+          projectId: payments-api
+    asserts:
+      - failedTemplate:
+          errorPattern: "which is not a project ID"
+
+  - it: accepts several web replicas without Redis (spec 051 D10, the key ring comes from a Secret)
     set:
       signalr.redis.connectionString: ""
       web.replicas: 2
     asserts:
-      - failedTemplate:
-          errorPattern: "web.replicas is greater than 1"
+      - hasDocuments:
+          count: 1
 
   - it: accepts several web replicas with Redis
     set:

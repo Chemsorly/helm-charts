@@ -34,7 +34,9 @@ spec:
         app.kubernetes.io/component: web
     spec:
       serviceAccountName: {{ include "coding-agent-automation.serviceAccountName" . }}
-      automountServiceAccountToken: true
+      # The web host makes no Kubernetes API calls (leader election runs in the Scheduler and the
+      # Job Controller), so the internet-facing pod carries no service account token.
+      automountServiceAccountToken: false
       terminationGracePeriodSeconds: {{ $web.terminationGracePeriodSeconds }}
       {{- with $web.podSecurityContext }}
       securityContext:
@@ -108,6 +110,8 @@ spec:
                 name: {{ include "coding-agent-automation.fullname" . }}-web-env
           env:
             {{- include "coding-agent-automation.secretEnv" . | nindent 12 }}
+            {{- include "coding-agent-automation.userTokenEnv" . | nindent 12 }}
+            {{- include "coding-agent-automation.dataProtectionKeyEnv" . | nindent 12 }}
             # Spec 049: secrets of the user login (the rest of the auth config is in auth.json).
             {{- if include "coding-agent-automation.adminEnabled" . }}
             - name: Auth__Admin__Password
@@ -125,12 +129,8 @@ spec:
                   key: {{ .clientSecret.key | default "client-secret" }}
             {{- end }}
             {{- end }}
-            # KubernetesWorkDistributor and KubernetesJobCleanup have been migrated to
-            # IPipelineApiWorkItemClient. IPipelineRunHistoryService, IConsolidationRunStore,
-            # IHarnessSuggestionStore, and IWorkItemFallbackTransitionService are all API-backed
-            # as of arch-audit 2026-08-22 (T8 complete). The web no longer holds a
-            # Postgres connection. Database env vars removed.
-            {{- include "coding-agent-automation.signalrEnv" . | nindent 12 }}
+            # The web host holds no Postgres and (spec 051 D10) no Redis connection: its Data
+            # Protection ring comes from DataProtection__Key above, infrastructure health from the API.
             # Pipeline API connection — required by IPipelineApiConfigClient and IAgentHubConnection.
             # Spec 045 Req 6.4: web must know API base URL and hub URL.
             - name: PipelineApi__BaseUrl
@@ -150,14 +150,6 @@ spec:
               {{- else -}}
                 {{- printf "http://%s-scheduler.%s.svc.cluster.local:%d" (include "coding-agent-automation.fullname" .) .Release.Namespace (.Values.scheduler.service.port | int) | quote }}
               {{- end }}
-            # Leader election lease name — release-scoped to prevent collision when multiple
-            # Helm releases share a namespace (Req 6.3/6.7). Overridable via values.yaml.
-            - name: LeaderElection__PipelineLoopLeaseName
-              value: {{ include "coding-agent-automation.leaseName" (dict "override" $web.leaderElection.pipelineLoopLeaseName "suffix" "pipeline-loop-lock" "root" .) }}
-            - name: LeaderElection__Namespace
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
             # Downward API: expose namespace and pod name so OTEL_RESOURCE_ATTRIBUTES can reference
             # them via $(VAR_NAME) substitution. These MUST come before OTEL_RESOURCE_ATTRIBUTES.
             {{- include "coding-agent-automation.otelEnv" (dict "serviceName" (.Values.otel.webServiceName | default "coding-agent-web") "deploymentName" (printf "%s-web" (include "coding-agent-automation.fullname" .)) "root" .) | nindent 12 }}
