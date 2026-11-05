@@ -200,6 +200,8 @@ Usage (inside an env: list, indented to 12):
   value: {{ include "coding-agent-automation.secretName" . | quote }}
 - name: WorkDistribution__JobTemplatesPath
   value: "/app/config/job-templates.yaml"
+- name: WorkDistribution__MaxConcurrentAgents
+  value: {{ .Values.workDistribution.maxConcurrentAgents | default 0 | quote }}
 {{- /* TODO [WARNING]: WorkDistribution__Dispatch__IntervalSeconds and the other Dispatch__* env vars
      below are injected into the API container but the WorkItemDispatchService that consumed them was
      removed in issue #2547. The API no longer starts a dispatch background loop, so these values are
@@ -405,9 +407,42 @@ Spec 049: render-time validation of the auth values (the web host validates them
     {{- if not (regexMatch "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" (toString $b.projectId)) }}
       {{- fail (printf "auth.rbac.bindings[%d] has projectId '%s', which is not a project ID." $i $b.projectId) }}
     {{- end }}
-    {{- if eq (lower (toString $b.role)) "admin" }}
-      {{- fail (printf "auth.rbac.bindings[%d] binds role admin to projectId %q. The admin role can only be bound globally." $i $b.projectId) }}
+    {{- if eq (lower (toString $b.projectId)) "00000000-0000-0000-0000-000000000000" }}
+      {{- fail (printf "auth.rbac.bindings[%d] binds the Default project. The Default project takes no project bindings; bind the role globally or move the repositories to a project." $i) }}
     {{- end }}
   {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+Where agent pods may send telemetry inside the cluster, as JSON: {"namespace":"<ns>","port":<port>},
+or {} when no rule can be derived. Parsed with regexFind, not the built-in URL parser: the built-in
+parser fails the render on a malformed URL, and a typo in otel.endpoint must not stop an upgrade.
+agentNetworkPolicy.otel.namespace and agentNetworkPolicy.otel.port override what the URL says.
+*/}}
+{{- define "coding-agent-automation.agentOtelTarget" -}}
+{{- $override := (.Values.agentNetworkPolicy | default dict).otel | default dict -}}
+{{- $endpoint := (.Values.otel | default dict).endpoint | default "" | lower -}}
+{{- $namespace := "" -}}
+{{- $port := "" -}}
+{{- $authority := regexFind "^https?://[a-z0-9.-]+(:[0-9]+)?(/.*)?$" $endpoint | regexFind "^https?://[^/]+" | trimPrefix "http://" | trimPrefix "https://" -}}
+{{- if $authority -}}
+  {{- $host := regexFind "^[^:]+" $authority -}}
+  {{- $port = regexFind "[0-9]+$" (regexFind ":[0-9]+$" $authority) -}}
+  {{- if not (regexMatch "^[0-9]+([.][0-9]+){3}$" $host) -}}
+    {{- $labels := splitList "." $host -}}
+    {{- if eq (len $labels) 1 -}}
+      {{- $namespace = .Release.Namespace -}}
+    {{- else if or (eq (len $labels) 2) (eq (index $labels 2) "svc") -}}
+      {{- $namespace = index $labels 1 -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- $namespace = $override.namespace | default $namespace -}}
+{{- $port = $override.port | default $port -}}
+{{- if and $namespace $port -}}
+{{- dict "namespace" $namespace "port" (int $port) | toJson -}}
+{{- else -}}
+{}
+{{- end -}}
+{{- end -}}

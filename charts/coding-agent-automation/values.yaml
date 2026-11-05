@@ -16,7 +16,7 @@ web:
   image:
     repository: chemsorly/coding-agent
     # Tag for the web image. On release, CI overwrites this to semver.
-    tag: coding-agent-web-0.4.13
+    tag: coding-agent-web-0.4.14
   replicas: 2
   # Additional annotations on the Deployment metadata (e.g., reloader.stakater.com/auto: "true")
   annotations: {}
@@ -141,7 +141,7 @@ secrets:
   opencodeConfigContent: ""
 
   # Optional: credentials for claude providerType agent jobs (Claude Code CLI). Set one or both;
-  # the agent provider config's "Auth mode" picks which one a run uses (auto = API key if set,
+  # the agent profile's "Auth mode" picks which one a run uses (auto = API key if set,
   # otherwise the subscription token). Each key is omitted from the Secret when empty.
   # claudeApiKey: Anthropic API key from the Claude Console (billed per token).
   claudeApiKey: ""
@@ -213,10 +213,15 @@ auth:
     defaultRole: ""
     # Roles: readonly < operator < admin. A binding names a group or a user; with "projectId" (the
     # project's ID, shown on Settings → Projects → project → Overview) it applies to that project
-    # only. admin can only be bound globally.
+    # only. admin on a project edits that project and its repositories' behaviour; global admin
+    # keeps everything else. The Default project (00000000-0000-0000-0000-000000000000) takes no
+    # project bindings.
     bindings: []
     # - group: platform-team
     #   role: admin
+    # - group: team-payments
+    #   role: admin
+    #   projectId: 6f1c2a9e-0000-0000-0000-000000000000   # payments-api (project admin)
     # - group: 6f1c2a9e-0000-0000-0000-000000000000   # Entra ID group object ID
     #   role: operator
     #   projectId: 6f1c2a9e-0000-0000-0000-000000000000   # payments-api
@@ -239,7 +244,7 @@ secretInit:
     # For production, override with a digest-pinned reference:
     #   e.g. alpine/kubectl@sha256:<digest>
     repository: alpine/kubectl
-    tag: "1.37.1"
+    tag: "1.37.2"
   # Maximum seconds the hook Job may run before it is forcibly failed.
   # Without this bound, a stuck image pull (air-gapped cluster, registry.k8s.io blocked)
   # would freeze `helm install` indefinitely since pre-install hooks block Helm until they
@@ -273,6 +278,33 @@ otel:
   # filter on service.name="coding-agent-web" for API traffic.
   apiServiceName: coding-agent-api
   resourceAttributes: ""
+
+# ── Agent network policy ─────────────────────────────────────────────────────
+
+# Default deny for agent pods, with an allow-list. Needs a CNI that enforces NetworkPolicy.
+# See "Agent network policy" in docs/deployment.md.
+agentNetworkPolicy:
+  enabled: true
+  # Egress peer for cluster DNS: a NetworkPolicy peer, used as written. Helm merges maps, so to
+  # replace a default label set it to null, for example k8s-app: null.
+  dnsSelector:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+  # Required while enabled: the cluster's pod and service CIDRs, IPv4 and IPv6 in one list.
+  # They are excepted from the "everything outside the cluster" rule.
+  # k3s defaults: [10.42.0.0/16, 10.43.0.0/16]. Add node addresses or a cloud metadata address
+  # here to block them as well.
+  clusterCidrs: []
+  # Optional {namespace, port}, overriding what otel.endpoint says: use it when the collector's
+  # Service port differs from its pod port, or otel.endpoint is an IP address or has no port.
+  otel: {}
+  # Extra egress rules, used as written: for destinations inside the cluster, such as an
+  # in-cluster MCP server.
+  extraEgress: []
 
 # ── ServiceAccount ───────────────────────────────────────────────────────────
 
@@ -332,6 +364,9 @@ workDistribution:
   reconciliation:
     intervalSeconds: 30
     staleRetentionDays: 7
+  # Spec 057: infrastructure ceiling for all agent pods together (pipeline runs, consolidation, triage and chats).
+  # Settings → Agents → Capacity can set a lower limit, never a higher one. 0 = no limit.
+  maxConcurrentAgents: 0
 
 # ── Credential Pools ─────────────────────────────────────────────────────────
 
@@ -352,6 +387,10 @@ credentialPools:
 # Job templates define the K8s Job pod spec for each agent label set.
 # Each entry becomes a template in the job-templates ConfigMap that DispatchService
 # uses to create K8s Job pods per WorkItem.
+#
+# maxConcurrent (spec 057): infrastructure ceiling for this template's agent pods, chats included (for example the
+# number of Kiro credential PVCs). Settings → Agents → Capacity can set a lower limit, never a higher one.
+# 0 or no value = no limit. A change to jobTemplates restarts the API and the Job Controller (checksum annotation).
 jobTemplates: []
   # Example:
   # - labels: "kiro,dotnet,dotnet10"
